@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790759057073,
+      "tag": "0000_kyc_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791010996617,
+      "tag": "0001_kyc_biometrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791310765666,
+      "tag": "0002_grant_table_access",
+      "breakpoints": true
+    }
+  ]
+}
