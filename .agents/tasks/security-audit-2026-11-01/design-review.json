@@ -1,0 +1,62 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "MEDIUM",
+      "title": "preValidateSize omits the face-descriptor arrays, leaving a collection-exhaustion vector open under the stated fallback",
+      "location": "remediation-design.md, Batch 2 — preValidateSize helper + 'Fallback if the v4 migration proves too risky' note; src/lib/kyc.functions.ts (face.selfieDescriptor / face.idDescriptor are z.array(z.number().finite()).length(128))",
+      "problem": "The pre-parse guard bounds documentImage/backImage/selfieImage strings, consent keys (>16) and liveness.challenges (>20) but does NOT bound face.selfieDescriptor or face.idDescriptor. Those are constrained collections (z.array(z.number().finite()).length(128)) of the exact class GHSA-mrhx-c7xc-m3w5 targets: zod validates every element before applying .length(128). The primary fix (zod >=4.6.6) closes it, but the design's explicit fallback ('keep zod ^3.25.76 and rely on preValidateSize ... This reduces the exhaustion vector') leaves the descriptor arrays unbounded, so the fallback's claim of reducing the vector is false for descriptors.",
+      "fix": "Add descriptor-array length bounds to preValidateSize (reject face.selfieDescriptor/face.idDescriptor arrays > 128 elements before safeParse). Amend the fallback note: under the v3 fallback preValidateSize must bound ALL collection fields (including descriptors) to 'reduce the exhaustion vector'; if descriptor bounds are not added, mark the fallback insufficient and make the v4 upgrade mandatory (no fallback)."
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "title": "V5 conflates Storage encryption-at-rest (default) with Database encryption-at-rest (paid add-on); risks re-introducing a false 'at rest' consent claim",
+      "location": "remediation-design.md, Batch 0/V3 ('Supabase enables this by default; verify it is not disabled') and V5; Batch 1 N8 reconciliation (card + bullet 1 'at rest' wording gated on V5)",
+      "problem": "The verification guidance says encryption-at-rest is 'enabled by default' for 'both Database and Storage'. That is true for Storage (S3 SSE, default) but NOT for the Database, where encryption-at-rest is a Supabase Pro/Enterprise add-on that is OFF by default. The biometric face descriptors and PII live in the Database, and the consent card's blanket 'Encrypted in transit and at rest' covers that DB-stored data. Telling the implementer the DB control is on by default biases the V5 check toward a false positive — the exact H1 failure mode (a consent claim not backed by a verified control).",
+      "fix": "Split V5 into two checks and drop the 'default' claim for the DB: Storage objects are encrypted at rest by default (verify not disabled); Database encryption-at-rest is a Supabase Pro/Enterprise add-on OFF by default — explicitly confirm it is enabled. If DB encryption-at-rest is NOT confirmed enabled, soften the card's blanket 'at rest' and bullet 1's 'stored encrypted at rest' (the design's fallback already says this, but it must not be skipped due to the false 'default' assumption)."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "title": "CSP 'the canary surfaces missing-source violations before it bites users' is wrong on the first enforced deploy",
+      "location": "remediation-design.md, Batch 4 — 'First deploy' code (enforced = full policy; canary = stricter on script-src only) and 'Edge cases' section",
+      "problem": "On the first deploy the full policy is promoted to ENFORCED. The report-only canary is stricter than enforced ONLY on script-src (it drops 'unsafe-inline'). For every other directive (connect-src, img-src, font-src, ...) the canary is identical to enforced, so a missing source the app needs is BLOCKED by the enforced policy for users at the same moment the canary reports it — no non-blocking pre-warning. The design's 'Edge cases' claim ('The kept report-only canary surfaces this in the console before it bites users (report-only does not block)') is incorrect for the missing-source case: a broken capture flow (OCR/face models fail to load) bites users immediately on first enforced deploy. The safer prose ('run the full flow under report-only before relying on enforcement') contradicts the step-1 code, which deploys enforced + canary together.",
+      "fix": "Make the safe procedure explicit: BEFORE any code change, run the full portal flow under the CURRENT report-only policy and confirm zero missing-source violations (the real pre-enforcement gate); only then apply the code change promoting to enforced. Correct the Edge-cases text: the canary pre-warns for inline scripts only (where it is stricter); missing-source coverage must be verified under report-only before the first enforced deploy, not relied upon to surface 'before it bites users'. Alternative: keep the full policy report-only on first deploy and promote to enforced only after a clean canary run."
+    },
+    {
+      "id": 4,
+      "severity": "NIT",
+      "title": "The CSP_REPORT_ONLY.replace(\"'unsafe-inline'\", \"\") canary is positional/fragile",
+      "location": "remediation-design.md, Batch 4 — withSecurityHeaders snippet",
+      "problem": "Dropping 'unsafe-inline' from script-src via String.replace of the first occurrence relies on script-src appearing before style-src in the directive string. If a maintainer reorders directives, the replace silently strips 'unsafe-inline' from style-src instead, defeating the inline-script detection on which the whole M3/M4 procedure depends, with no compile-time signal (and it leaves a stray double-space).",
+      "fix": "Construct the canary as an explicit, separate constant whose script-src omits 'unsafe-inline' (order-independent), rather than deriving it by positional replace on the enforced policy string."
+    },
+    {
+      "id": 5,
+      "severity": "NIT",
+      "title": "H3b misattributes the 'Too many requests' error path",
+      "location": "remediation-design.md, Batch 3, H3b ('the handler surfaces \"Too many requests\" only for [the gateway 429/402] case'); src/lib/ai.server.ts + src/lib/kyc.functions.ts",
+      "problem": "Per ai.server.ts, the gateway 429 throws AiError('The AI service is busy...') and 402 throws AiError('AI credits are used up...'); neither starts with 'Too many requests', so they surface as the generic 'Document analysis is unavailable.' The 'Too many requests.' message actually comes from the per-instance RateLimitError thrown by enforceRateLimit BEFORE the AI call. The design has the attribution backwards (the gateway backstop still fires, but as the generic message, not a distinct 'Too many requests' signal).",
+      "fix": "Correct H3b: the gateway 429/402 backstop surfaces to the caller as the generic 'Document analysis is unavailable.'; the 'Too many requests.' client message comes from the per-instance RateLimitError, not the gateway. Update the H3b wording accordingly."
+    },
+    {
+      "id": 6,
+      "severity": "NIT",
+      "title": "The H1 'remove claims vs build controls' choice is surfaced only in Overview prose, not as a discrete owner-decision item",
+      "location": "remediation-design.md, Overview ('either ship truthful-but-thinner consent now (this design) ... or defer launch') vs. Batch 1 which implements remove-claims",
+      "problem": "H1's finding offers two valid fixes (implement the promised controls, or remove the false claims). The design defaults to 'remove claims' (Batch 1) and presents 'build controls' only as D1-D3 plus prose. Committing a public biometric product to materially thinner consent/trust claims is a product decision with conversion/trust consequences; the owner's 'fix all the issues' could reasonably mean build the controls. The choice is surfaced in Overview prose but is not a discrete Needs-owner-decision item, and Batch 1 proceeds to implement one side of it.",
+      "fix": "Add the choice itself as a discrete Needs-owner-decision item (e.g., D0: confirm thinner consent / remove claims / ship now vs. build the retention/erasure/encryption controls / defer launch) so the owner explicitly signs off on the remove-claims path before Batch 1 ships, rather than having it land as the implicit default."
+    },
+    {
+      "id": 7,
+      "severity": "NIT",
+      "title": "zod v4 peer-dependency impact on the installed (unused) @hookform/resolvers is not addressed",
+      "location": "remediation-design.md, Batch 2 ('@hookform/resolvers/zod is not imported anywhere, so form resolvers are unaffected'); package.json (@hookform/resolvers ^5.2.2 is an installed dependency)",
+      "problem": "The claim is correct at runtime (the resolver is not imported), but @hookform/resolvers is an installed dependency with a zod peer dependency; bumping zod to v4 can trigger a peer-dependency conflict at npm install time even though no code imports it. The 'unaffected' statement addresses only the code surface, not the install.",
+      "fix": "Add to Batch 2 verification: confirm npm install of zod ^4.6.6 does not conflict with @hookform/resolvers's zod peer range (or remove the unused dependency / add an override) so the install succeeds cleanly, alongside the existing 're-run npm run build' step."
+    }
+  ],
+  "reviewDoc": "c:/Users/Ma ron/OneDrive/Desktop/trueengine-main/.agents/tasks/security-audit-2026-11-01/design-review.md"
+}
